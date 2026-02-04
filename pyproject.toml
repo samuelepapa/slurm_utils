@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "slurm_utils"
-version = "0.1.0"
+version = "0.1.1"
 description = "Utility scripts for managing Slurm jobs on Snellius"
 readme = "README.md"
 authors = [

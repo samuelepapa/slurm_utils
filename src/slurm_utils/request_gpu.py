@@ -96,10 +96,18 @@ def get_job_node(args, job_id):
             print(f"Error checking job status: {e}")
             time.sleep(5)
 
-def update_ssh_config(node_name):
-    """Updates the ~/.ssh/config file with the new node name."""
+def update_ssh_config(node_name, proxy_host, user):
+    """Updates the ~/.ssh/config file with the new node name. Creates it if missing."""
     config_path = os.path.expanduser("~/.ssh/config")
     
+    # Ensure config file exists
+    if not os.path.exists(config_path):
+        # Create directory if needed
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        # Create empty file
+        with open(config_path, "w") as f:
+            pass
+
     with open(config_path, "r") as f:
         lines = f.readlines()
     
@@ -133,8 +141,13 @@ def update_ssh_config(node_name):
         new_lines.append(line)
 
     if not found_target:
-        print(f"Error: '{target_host_marker}' block not found in {config_path}")
-        return
+        print(f"'{target_host_marker}' block not found in {config_path}. Adding it.")
+        if new_lines and not new_lines[-1].endswith('\n'):
+            new_lines.append('\n')
+        new_lines.append(f"\n{target_host_marker}\n")
+        new_lines.append(f"    HostName {node_name}\n")
+        new_lines.append(f"    User {user}\n")
+        new_lines.append(f"    ProxyJump {proxy_host}\n")
 
     with open(config_path, "w") as f:
         f.writelines(new_lines)
@@ -144,7 +157,7 @@ def main():
     args = parse_args()
     job_id = submit_job(args)
     node_name = get_job_node(args, job_id)
-    update_ssh_config(node_name)
+    update_ssh_config(node_name, args.host, args.user)
     print("Done! You can now access the GPU node via 'ssh snellius_gpu_node'")
 
 if __name__ == "__main__":
