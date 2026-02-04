@@ -4,19 +4,35 @@ This repository contains utility scripts for managing Slurm jobs, specifically t
 
 ## Scripts
 
-### `request_gpu.py`
+### `request_gpu`
 
-This script automates the process of requesting a GPU node on Snellius and updating your local SSH configuration to allow direct access to the assigned node.
+This tool automates the process of requesting a GPU node on Snellius and updating your local SSH configuration to allow direct access to the assigned node.
 
 It performs the following steps:
 1. Submits an interactive-like job (sleeping) to the Slurm queue.
 2. Waits for the job to start and retrieves the assigned node name.
 3. Updates your `~/.ssh/config` file to map `Host snellius_gpu_node` to the assigned compute node.
 
-#### Usage
+#### Installation
+
+To install the package, run the following command in the repository root:
 
 ```bash
-python request_gpu.py [options]
+pip install .
+```
+
+To install in editable mode (for development):
+
+```bash
+pip install -e .
+```
+
+#### Usage
+
+After installation, you can use the command `request-gpu` directly:
+
+```bash
+request-gpu [options]
 ```
 
 #### Options
@@ -32,7 +48,7 @@ python request_gpu.py [options]
 Request a GPU for 2 hours on the 'gpu' partition:
 
 ```bash
-python request_gpu.py --time 02:00:00 --partition gpu
+request-gpu --time 02:00:00 --partition gpu
 ```
 
 After the script completes, you can SSH directly to the node:
