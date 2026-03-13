@@ -118,33 +118,36 @@ def update_ssh_config(node_name, proxy_host, user):
     found_target = False
 
     for line in lines:
-        if line.strip().startswith(target_host_marker):
-            in_target_host = True
-            found_target = True
-            new_lines.append(line)
-            continue
-            
+        stripped_line = line.strip()
+        lower_line = stripped_line.lower()
+
+        # Check for start of any block (Host or Match)
+        if lower_line.startswith("host ") or lower_line.startswith("match "):
+            parts = stripped_line.split()
+            # If it's our target Host line
+            if lower_line.startswith("host ") and len(parts) >= 2 and "snellius_gpu_node" in parts[1:]:
+                in_target_host = True
+                found_target = True
+                new_lines.append(line)
+                # Inject the new HostName right after the Host line
+                new_lines.append(f"    HostName {node_name}\n")
+                continue
+            else:
+                in_target_host = False
+
         if in_target_host:
-            # Check if this line is the start of a new Host block (meaning end of ours)
-            if line.strip().startswith("Host ") and not line.strip().startswith("HostName"):
-                 in_target_host = False
-            # Or if it's an empty line, usually separates blocks
-            elif line.strip() == "":
-                 in_target_host = False
-            
-            if in_target_host and line.strip().startswith("HostName"):
-                # Preserve indentation
-                indent = line[:line.find("HostName")]
-                new_lines.append(f"{indent}HostName {node_name}\n")
+            # We are inside the target host block. We already injected the new HostName.
+            # We skip any existing HostName lines to replace them.
+            if lower_line.startswith("hostname ") or lower_line.startswith("hostname=") or lower_line.startswith("hostname\t") or lower_line == "hostname":
                 continue
         
         new_lines.append(line)
 
     if not found_target:
         print(f"'{target_host_marker}' block not found in {config_path}. Adding it.")
-        if new_lines and not new_lines[-1].endswith('\n'):
+        if new_lines and not new_lines[-1].endswith('\n') and new_lines[-1] != '':
             new_lines.append('\n')
-        new_lines.append(f"\n{target_host_marker}\n")
+        new_lines.append(f"{target_host_marker}\n")
         new_lines.append(f"    HostName {node_name}\n")
         new_lines.append(f"    User {user}\n")
         new_lines.append(f"    ProxyJump {proxy_host}\n")
