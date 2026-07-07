@@ -1,44 +1,178 @@
 import argparse
-import subprocess
-import time
-import re
+import json
 import os
+import shlex
+import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Request a GPU node on Snellius and update SSH config.")
-    parser.add_argument("--time", type=str, default="01:00:00", help="Job duration (HH:MM:SS), default 1 hour")
-    parser.add_argument("--partition", type=str, default="gpu", help="Slurm partition, default 'gpu'")
-    parser.add_argument("--gpus", type=str, default="1", help="Number of GPUs, default 1")
-    parser.add_argument("--user", type=str, default="spapa01", help="Username on the cluster")
-    parser.add_argument("--host", type=str, default="snellius01", help="Login node hostname")
-    return parser.parse_args()
+
+DEFAULT_LOGIN_HOST = "snellius01"
+DEFAULT_USER = "spapa01"
+DEFAULT_SSH_NAME = "snellius_gpu_node"
+STATE_DIR_NAME = "slurm_utils"
+STATE_FILE_NAME = "request_gpu.json"
+COPIED_PROXY_OPTIONS = ("IdentityFile", "IdentitiesOnly")
+
+
+def parse_args(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--" in argv:
+        separator_index = argv.index("--")
+        utility_argv = argv[:separator_index]
+        sbatch_args = argv[separator_index + 1:]
+    else:
+        utility_argv = argv
+        sbatch_args = []
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Request a Slurm allocation and update local SSH config. "
+            "Pass all sbatch arguments after --."
+        )
+    )
+    parser.add_argument("--user", type=str, default=DEFAULT_USER, help="Username on the cluster")
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=DEFAULT_LOGIN_HOST,
+        help="Login node hostname used for sbatch and squeue",
+    )
+    parser.add_argument(
+        "--ssh-name",
+        type=str,
+        default=None,
+        help=f"Local SSH config Host alias, default auto-selects from '{DEFAULT_SSH_NAME}'",
+    )
+    parser.add_argument(
+        "--proxy-host",
+        type=str,
+        default=None,
+        help="ProxyJump host for new SSH config entries, default uses --host",
+    )
+    parser.add_argument(
+        "--identity-file",
+        type=str,
+        default=None,
+        help="IdentityFile to write into the generated SSH config entry",
+    )
+    args = parser.parse_args(utility_argv)
+    args.sbatch_args = sbatch_args
+    args.proxy_host = args.proxy_host or args.host
+    args.explicit_ssh_name = args.ssh_name is not None
+    return args
+
+
+def get_state_path():
+    config_home = os.environ.get("XDG_CONFIG_HOME")
+    if not config_home:
+        config_home = os.path.expanduser("~/.config")
+    return os.path.join(config_home, STATE_DIR_NAME, STATE_FILE_NAME)
+
+
+def load_state(path=None):
+    path = path or get_state_path()
+    if not os.path.exists(path):
+        return {"requests": []}
+
+    try:
+        with open(path, "r") as f:
+            state = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {"requests": []}
+
+    requests = state.get("requests", [])
+    if not isinstance(requests, list):
+        requests = []
+    return {"requests": requests}
+
+
+def save_state(state, path=None):
+    path = path or get_state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(state, f, indent=2, sort_keys=True)
+        f.write("\n")
+
+
+def is_job_active(login_host, job_id):
+    if not login_host or not job_id:
+        return False
+
+    remote_cmd = "squeue -j {job_id} --noheader".format(job_id=shlex.quote(str(job_id)))
+    result = subprocess.run(
+        ["ssh", login_host, remote_cmd],
+        shell=False,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = f"{result.stdout}\n{result.stderr}".lower()
+        if "invalid job id specified" in output or "invalid job id" in output:
+            return False
+        # Be conservative if the login host is temporarily unavailable.
+        return True
+    return bool(result.stdout.strip())
+
+
+def prune_state(state):
+    active_requests = []
+    for request in state.get("requests", []):
+        if is_job_active(request.get("login_host"), request.get("job_id")):
+            active_requests.append(request)
+    return {"requests": active_requests}
+
+
+def select_ssh_name(state, requested_name=None):
+    active_names = {request.get("ssh_name") for request in state.get("requests", [])}
+
+    if requested_name:
+        if requested_name in active_names:
+            raise ValueError(f"SSH name '{requested_name}' is already used by an active request")
+        return requested_name
+
+    if DEFAULT_SSH_NAME not in active_names:
+        return DEFAULT_SSH_NAME
+
+    suffix = 2
+    while True:
+        candidate = f"{DEFAULT_SSH_NAME}_{suffix}"
+        if candidate not in active_names:
+            return candidate
+        suffix += 1
+
+
+def record_request(state, job_id, ssh_name, node_name, login_host, proxy_host, identity_file=None):
+    requests = list(state.get("requests", []))
+    request = {
+        "job_id": str(job_id),
+        "ssh_name": ssh_name,
+        "node_name": node_name,
+        "login_host": login_host,
+        "proxy_host": proxy_host,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if identity_file:
+        request["identity_file"] = identity_file
+    requests.append(request)
+    return {"requests": requests}
+
+
+def build_sbatch_command(sbatch_args):
+    quoted_args = [shlex.quote(arg) for arg in sbatch_args]
+    return " ".join(["sbatch", "--parsable", *quoted_args, "--wrap=" + shlex.quote("sleep infinity")])
+
 
 def submit_job(args):
     """Submits an interactive-like job that just sleeps."""
-    # We need to be careful with quotes when passing commands through SSH.
-    # The command roughly becomes: ssh host "sbatch ... --wrap='sleep infinity'"
-    # To be safe, we'll wrap the inner command in quotes.
-    
-    # Construct the sbatch command first
-    sbatch_cmd = (
-        f"sbatch --parsable "
-        f"--partition={args.partition} "
-        f"--time={args.time} "
-        f"--gpus={args.gpus} "
-        f"--wrap='sleep infinity'"
-    )
-    
-    # Now construct the SSH command. We quote the sbatch command to ensure it's treated as a single argument on the remote side if needed,
-    # or just rely on proper escaping.
-    # Simplest reliable way: pass as a list to subprocess without shell=True, 
-    # and pass the entire remote command as one argument to ssh.
-    
+    sbatch_cmd = build_sbatch_command(args.sbatch_args)
     ssh_cmd = ["ssh", args.host, sbatch_cmd]
-    
+
     print(f"Submitting job: {' '.join(ssh_cmd)}")
     try:
-        # shell=False is safer and cleaner here
         job_id = subprocess.check_output(ssh_cmd, shell=False).decode().strip()
         print(f"Job submitted. ID: {job_id}")
         return job_id
@@ -46,49 +180,38 @@ def submit_job(args):
         print(f"Error submitting job: {e}")
         sys.exit(1)
 
+
 def get_job_node(args, job_id):
     """Waits for the job to start and returns the node name."""
     print("Waiting for job to start...")
     while True:
-        # Use a list to separate arguments and avoid shell interpretation of special chars like |
-        # We need to wrap the format string in quotes for the remote shell if we were using a string,
-        # but with a list, we just pass the argument.
-        # However, SSH concatenates arguments with spaces.
-        # So we really need to ensure the remote side sees the quotes around the format string.
-        # Or better, just don't use characters that need escaping if possible, or quote them.
-        
-        # ssh args.host "squeue -j job_id -o '%N|%t' --noheader"
-        # We will construct the remote command as a single strong string with internal quotes
-        
-        remote_cmd = f"squeue -j {job_id} -o '%N|%t' --noheader"
+        remote_cmd = f"squeue -j {shlex.quote(str(job_id))} -o '%N|%t' --noheader"
         ssh_cmd = ["ssh", args.host, remote_cmd]
-        
+
         try:
             output = subprocess.check_output(ssh_cmd, shell=False).decode().strip()
             if not output:
                 print("Job not found in queue (maybe finished or failed?).")
                 sys.exit(1)
-            
-            # Output format: NODE|STATE
-            parts = output.split('|')
+
+            parts = output.split("|")
             if len(parts) < 2:
-                 # Sometimes output might be weird if job is just starting or weird state
-                 print(f"Unexpected output: {output}")
-                 time.sleep(2)
-                 continue
-                 
+                print(f"Unexpected output: {output}")
+                time.sleep(2)
+                continue
+
             node = parts[0].strip()
             state = parts[1].strip()
 
             if state == "R":
                 print(f"Job is running on node: {node}")
                 return node
-            elif state in ["PD", "CF", "CG"]: # Pending, Configuring, Completing
+            elif state in ["PD", "CF", "CG"]:
                 print(f"Job state: {state}. Waiting...")
                 time.sleep(5)
             else:
                 print(f"Job in unexpected state: {state}")
-                if state in ["CD", "F", "TO", "NF"]: # Completed, Failed, Timeout, NodeFail
+                if state in ["CD", "F", "TO", "NF"]:
                     sys.exit(1)
                 time.sleep(5)
 
@@ -96,72 +219,140 @@ def get_job_node(args, job_id):
             print(f"Error checking job status: {e}")
             time.sleep(5)
 
-def update_ssh_config(node_name, proxy_host, user):
-    """Updates the ~/.ssh/config file with the new node name. Creates it if missing."""
-    config_path = os.path.expanduser("~/.ssh/config")
-    
-    # Ensure config file exists
-    if not os.path.exists(config_path):
-        # Create directory if needed
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        # Create empty file
-        with open(config_path, "w") as f:
-            pass
 
-    with open(config_path, "r") as f:
-        lines = f.readlines()
-    
+def get_host_options(lines, host_name):
+    options = []
+    in_host = False
+
+    for line in lines:
+        stripped_line = line.strip()
+        lower_line = stripped_line.lower()
+
+        if lower_line.startswith("host ") or lower_line.startswith("match "):
+            parts = stripped_line.split()
+            in_host = lower_line.startswith("host ") and host_name in parts[1:]
+            continue
+
+        if not in_host or not stripped_line or stripped_line.startswith("#"):
+            continue
+
+        parts = stripped_line.split(None, 1)
+        if len(parts) == 2:
+            options.append((parts[0], parts[1]))
+
+    return options
+
+
+def get_copied_proxy_options(lines, proxy_host):
+    copied_option_names = {option.lower() for option in COPIED_PROXY_OPTIONS}
+    return [
+        (name, value)
+        for name, value in get_host_options(lines, proxy_host)
+        if name.lower() in copied_option_names
+    ]
+
+
+def get_extra_ssh_options(lines, proxy_host, identity_file=None):
+    if identity_file:
+        return [("IdentityFile", identity_file), ("IdentitiesOnly", "yes")]
+    return get_copied_proxy_options(lines, proxy_host)
+
+
+def render_ssh_config(lines, ssh_name, node_name, user, proxy_host, extra_options=None):
+    extra_options = extra_options or []
+    extra_option_names = {option_name.lower() for option_name, _ in extra_options}
     new_lines = []
     in_target_host = False
-    target_host_marker = "Host snellius_gpu_node"
-    
     found_target = False
 
     for line in lines:
         stripped_line = line.strip()
         lower_line = stripped_line.lower()
 
-        # Check for start of any block (Host or Match)
         if lower_line.startswith("host ") or lower_line.startswith("match "):
             parts = stripped_line.split()
-            # If it's our target Host line
-            if lower_line.startswith("host ") and len(parts) >= 2 and "snellius_gpu_node" in parts[1:]:
+            if lower_line.startswith("host ") and ssh_name in parts[1:]:
                 in_target_host = True
                 found_target = True
                 new_lines.append(line)
-                # Inject the new HostName right after the Host line
                 new_lines.append(f"    HostName {node_name}\n")
+                for option_name, option_value in extra_options:
+                    new_lines.append(f"    {option_name} {option_value}\n")
                 continue
-            else:
-                in_target_host = False
+            in_target_host = False
 
-        if in_target_host:
-            # We are inside the target host block. We already injected the new HostName.
-            # We skip any existing HostName lines to replace them.
-            if lower_line.startswith("hostname ") or lower_line.startswith("hostname=") or lower_line.startswith("hostname\t") or lower_line == "hostname":
-                continue
-        
+        option_name = stripped_line.split(None, 1)[0].lower() if stripped_line else ""
+        if in_target_host and (option_name == "hostname" or option_name in extra_option_names):
+            continue
+
         new_lines.append(line)
 
     if not found_target:
-        print(f"'{target_host_marker}' block not found in {config_path}. Adding it.")
-        if new_lines and not new_lines[-1].endswith('\n') and new_lines[-1] != '':
-            new_lines.append('\n')
-        new_lines.append(f"{target_host_marker}\n")
+        if new_lines and not new_lines[-1].endswith("\n") and new_lines[-1] != "":
+            new_lines.append("\n")
+        if new_lines and new_lines[-1].strip():
+            new_lines.append("\n")
+        new_lines.append(f"Host {ssh_name}\n")
         new_lines.append(f"    HostName {node_name}\n")
         new_lines.append(f"    User {user}\n")
         new_lines.append(f"    ProxyJump {proxy_host}\n")
+        for option_name, option_value in extra_options:
+            new_lines.append(f"    {option_name} {option_value}\n")
+
+    return new_lines, found_target
+
+
+def update_ssh_config(node_name, proxy_host, user, ssh_name, identity_file=None):
+    """Updates the ~/.ssh/config file with the assigned node name. Creates it if missing."""
+    config_path = os.path.expanduser("~/.ssh/config")
+
+    if not os.path.exists(config_path):
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w"):
+            pass
+
+    with open(config_path, "r") as f:
+        lines = f.readlines()
+
+    extra_options = get_extra_ssh_options(lines, proxy_host, identity_file)
+    new_lines, found_target = render_ssh_config(lines, ssh_name, node_name, user, proxy_host, extra_options)
+
+    if not found_target:
+        print(f"'Host {ssh_name}' block not found in {config_path}. Adding it.")
 
     with open(config_path, "w") as f:
         f.writelines(new_lines)
-    print(f"Updated {config_path} with HostName {node_name}")
+    print(f"Updated {config_path}: Host {ssh_name} -> {node_name}")
 
-def main():
-    args = parse_args()
+
+def main(argv=None):
+    args = parse_args(argv)
+
+    state = prune_state(load_state())
+    try:
+        args.ssh_name = select_ssh_name(state, args.ssh_name)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    save_state(state)
+
     job_id = submit_job(args)
     node_name = get_job_node(args, job_id)
-    update_ssh_config(node_name, args.host, args.user)
-    print("Done! You can now access the GPU node via 'ssh snellius_gpu_node'")
+    update_ssh_config(node_name, args.proxy_host, args.user, args.ssh_name, args.identity_file)
+
+    state = record_request(
+        state,
+        job_id,
+        args.ssh_name,
+        node_name,
+        args.host,
+        args.proxy_host,
+        args.identity_file,
+    )
+    save_state(state)
+
+    print(f"Done! You can now access the GPU node via 'ssh {args.ssh_name}'")
+
 
 if __name__ == "__main__":
     main()
