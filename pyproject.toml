@@ -1,22 +1,37 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
 
 [project]
 name = "slurm_utils"
 version = "0.2.1"
 description = "Utility scripts for managing Slurm jobs on Snellius"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
   { name="Samuele Papa", email="samuele.papa@example.com" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/samuelepapa/slurm_utils"
+Repository = "https://github.com/samuelepapa/slurm_utils"
 
 [project.scripts]
 request-gpu = "slurm_utils.request_gpu:main"
+
+[dependency-groups]
+dev = ["pytest>=7"]
+
+[tool.uv.build-backend]
+module-name = "slurm_utils"
+module-root = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

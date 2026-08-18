@@ -16,17 +16,48 @@ It performs the following steps:
 
 #### Installation
 
-To install the package, run the following command in the repository root:
+The recommended way to install this system-wide is with [uv](https://docs.astral.sh/uv/), which puts the
+`request-gpu` executable on your `PATH` in its own isolated environment.
+
+Straight from GitHub, no clone needed:
 
 ```bash
-pip install .
+uv tool install git+https://github.com/samuelepapa/slurm_utils
 ```
 
-To install in editable mode (for development):
+Or from a local checkout:
 
 ```bash
-pip install -e .
+uv tool install .
 ```
+
+If this is your first `uv tool install`, run `uv tool update-shell` once and restart your shell so that
+`~/.local/bin` is on your `PATH`.
+
+To upgrade, reinstall, or remove:
+
+```bash
+uv tool upgrade slurm-utils
+uv tool install --force git+https://github.com/samuelepapa/slurm_utils
+uv tool uninstall slurm-utils
+```
+
+To run it once without installing anything:
+
+```bash
+uvx --from git+https://github.com/samuelepapa/slurm_utils request-gpu -- --gres=gpu:1
+```
+
+`pip install .` still works if you prefer it.
+
+#### Development
+
+```bash
+uv sync          # create .venv and install the package plus dev dependencies
+uv run pytest    # run the test suite
+```
+
+Use `uv tool install --editable .` if you want the system-wide command to track your local edits.
 
 #### Usage
 

@@ -23,7 +23,13 @@ wheels/
 
 # Virtual Environment
 venv/
+.venv/
 .env
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.uv-cache/
 
 # IDEs
 .vscode/
