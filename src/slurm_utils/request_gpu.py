@@ -57,6 +57,12 @@ def parse_args(argv=None):
         default=None,
         help="IdentityFile to write into the generated SSH config entry",
     )
+    parser.add_argument(
+        "--email",
+        type=str,
+        default=None,
+        help="Email address to notify when the Slurm job starts running",
+    )
     args = parser.parse_args(utility_argv)
     args.sbatch_args = sbatch_args
     args.proxy_host = args.proxy_host or args.host
@@ -161,14 +167,22 @@ def record_request(state, job_id, ssh_name, node_name, login_host, proxy_host, i
     return {"requests": requests}
 
 
-def build_sbatch_command(sbatch_args):
+def build_sbatch_command(sbatch_args, email=None):
     quoted_args = [shlex.quote(arg) for arg in sbatch_args]
-    return " ".join(["sbatch", "--parsable", *quoted_args, "--wrap=" + shlex.quote("sleep infinity")])
+    mail_args = []
+    if email:
+        mail_args = [
+            shlex.quote(f"--mail-user={email}"),
+            "--mail-type=BEGIN",
+        ]
+    return " ".join(
+        ["sbatch", "--parsable", *mail_args, *quoted_args, "--wrap=" + shlex.quote("sleep infinity")]
+    )
 
 
 def submit_job(args):
     """Submits an interactive-like job that just sleeps."""
-    sbatch_cmd = build_sbatch_command(args.sbatch_args)
+    sbatch_cmd = build_sbatch_command(args.sbatch_args, args.email)
     ssh_cmd = ["ssh", args.host, sbatch_cmd]
 
     print(f"Submitting job: {' '.join(ssh_cmd)}")

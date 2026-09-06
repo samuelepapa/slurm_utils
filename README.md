@@ -74,6 +74,7 @@ request-gpu [ssh-options] -- [sbatch-options]
 - `--ssh-name`: Local SSH config alias to create or update. If omitted, the tool uses `snellius_gpu_node`, then `snellius_gpu_node_2`, and so on for multiple active requests.
 - `--proxy-host`: Host to use as `ProxyJump` in new SSH config entries. If omitted, this defaults to `--host`.
 - `--identity-file`: SSH private key to write as `IdentityFile` in the generated SSH config entry. When omitted, matching identity settings are copied from the proxy host entry when available.
+- `--email`: Email address to notify when the Slurm job starts running. This adds Slurm's `--mail-user` and `--mail-type=BEGIN` options.
 
 All Slurm options must be passed after `--`. The tool does not add a default partition, time limit, GPU count, or GRES request. It only appends `--wrap='sleep infinity'` to keep the allocation alive.
 
@@ -83,6 +84,12 @@ Request two GPUs for 2 hours on the `gpu` partition:
 
 ```bash
 request-gpu -- --partition=gpu --time=02:00:00 --gres=gpu:2 -n 1 --cpus-per-task=8
+```
+
+Request a GPU and receive an email when the job starts running:
+
+```bash
+request-gpu --email you@example.com -- --partition=gpu --gres=gpu:1
 ```
 
 Use a custom SSH alias and tunnel proxy host:

@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added a `uv.lock` lockfile and a `dev` dependency group for running the test suite with `uv run pytest`.
+- Added `--email` to `request-gpu` for notifications when the job starts running.
 
 ## [0.2.1] - 2026-07-07
 

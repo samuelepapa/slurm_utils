@@ -63,6 +63,12 @@ class RequestGpuTests(unittest.TestCase):
 
         self.assertEqual(args.identity_file, "~/.ssh/id_custom")
 
+    def test_parse_email(self):
+        args = request_gpu.parse_args(["--email", "user@example.com", "--", "--partition=gpu"])
+
+        self.assertEqual(args.email, "user@example.com")
+        self.assertEqual(args.sbatch_args, ["--partition=gpu"])
+
     def test_build_sbatch_command_has_no_slurm_defaults(self):
         command = request_gpu.build_sbatch_command([])
 
@@ -78,6 +84,14 @@ class RequestGpuTests(unittest.TestCase):
         self.assertEqual(
             command,
             "sbatch --parsable --gres=gpu:2 '--comment=needs space' --wrap='sleep infinity'",
+        )
+
+    def test_build_sbatch_command_adds_start_email_notification(self):
+        command = request_gpu.build_sbatch_command([], "user@example.com")
+
+        self.assertEqual(
+            command,
+            "sbatch --parsable --mail-user=user@example.com --mail-type=BEGIN --wrap='sleep infinity'",
         )
 
     def test_select_ssh_name_uses_numbered_aliases(self):
