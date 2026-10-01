@@ -2,22 +2,11 @@
 
 This repository contains utility scripts for managing Slurm jobs, specifically tailored for the Snellius cluster.
 
-## Scripts
+## Installation
 
-### `request_gpu`
-
-This tool automates the process of requesting a GPU node on Snellius and updating your local SSH configuration to allow direct access to the assigned node.
-
-It performs the following steps:
-1. Submits an interactive-like job (sleeping) to the Slurm queue.
-2. Waits for the job to start and retrieves the assigned node name.
-3. Updates your `~/.ssh/config` file with a local SSH alias for the assigned compute node.
-4. Tracks active requests locally so multiple allocations receive distinct SSH aliases.
-
-#### Installation
-
-The recommended way to install this system-wide is with [uv](https://docs.astral.sh/uv/), which puts the
-`request-gpu` executable on your `PATH` in its own isolated environment.
+Install this with [uv](https://docs.astral.sh/uv/) as a tool. That is the supported way: it puts the
+`request-gpu` and `slurm-resources` executables on your `PATH`, each in its own isolated environment, so
+they never clash with the Python environment you happen to be working in.
 
 Straight from GitHub, no clone needed:
 
@@ -42,22 +31,54 @@ uv tool install --force git+https://github.com/samuelepapa/slurm_utils
 uv tool uninstall slurm-utils
 ```
 
-To run it once without installing anything:
+To run a command once without installing anything:
 
 ```bash
 uvx --from git+https://github.com/samuelepapa/slurm_utils request-gpu -- --gres=gpu:1
+uvx --from git+https://github.com/samuelepapa/slurm_utils slurm-resources
 ```
 
-`pip install .` still works if you prefer it.
+`pip install .` still works if you prefer it, but then the commands live in whichever environment you
+installed them into.
 
-#### Development
+### Development
 
 ```bash
 uv sync          # create .venv and install the package plus dev dependencies
 uv run pytest    # run the test suite
 ```
 
-Use `uv tool install --editable .` if you want the system-wide command to track your local edits.
+Use `uv tool install --editable .` if you want the system-wide commands to track your local edits.
+
+## Shell completion
+
+Every command in this package supports the same two completion flags. Set a command up once:
+
+```bash
+request-gpu --setup-completion zsh       # or: bash
+slurm-resources --setup-completion zsh
+```
+
+This writes the completion script to `~/.config/slurm_utils/completion.<command>.<shell>` and appends a
+line to `~/.zshrc` (or `~/.bashrc`) that sources it. Open a new shell to start using it. Re-running the
+command refreshes the script without duplicating the line in your shell config.
+
+The scripts are generated from each command's own argument parser, so they always cover the full option
+set. Options that take a hostname (`--host`, `--proxy-host`) complete from the `Host` aliases declared in
+`~/.ssh/config` and any files it `Include`s; `--list-ssh-hosts` prints that same list.
+
+## Scripts
+
+### `request_gpu`
+
+This tool automates the process of requesting a GPU node on Snellius and updating your local SSH configuration to allow direct access to the assigned node.
+
+It performs the following steps:
+1. Submits an interactive-like job (sleeping) to the Slurm queue.
+2. Waits for the job to start and retrieves the assigned node name.
+3. Updates your `~/.ssh/config` file with a local SSH alias for the assigned compute node, reusing the
+   username that SSH already resolves for the login host.
+4. Tracks active requests locally so multiple allocations receive distinct SSH aliases.
 
 #### Usage
 
@@ -69,12 +90,14 @@ request-gpu [ssh-options] -- [sbatch-options]
 
 #### Options
 
-- `--user`: Username on the cluster (default: "spapa01").
+- `--user`: Username on the cluster. If omitted, it is taken from the `User` that SSH resolves for `--host`, which is your local username when the SSH config does not set one.
 - `--host`: Login node hostname used to run `sbatch` and `squeue` (default: "snellius01").
 - `--ssh-name`: Local SSH config alias to create or update. If omitted, the tool uses `snellius_gpu_node`, then `snellius_gpu_node_2`, and so on for multiple active requests.
 - `--proxy-host`: Host to use as `ProxyJump` in new SSH config entries. If omitted, this defaults to `--host`.
 - `--identity-file`: SSH private key to write as `IdentityFile` in the generated SSH config entry. When omitted, matching identity settings are copied from the proxy host entry when available.
 - `--email`: Email address to notify when the Slurm job starts running. This adds Slurm's `--mail-user` and `--mail-type=BEGIN` options.
+- `--setup-completion`: Install `bash` or `zsh` completion and exit.
+- `--list-ssh-hosts`: Print the `Host` aliases found in the local SSH config and exit.
 
 All Slurm options must be passed after `--`. The tool does not add a default partition, time limit, GPU count, or GRES request. It only appends `--wrap='sleep infinity'` to keep the allocation alive.
 
@@ -114,4 +137,64 @@ For the custom alias example:
 
 ```bash
 ssh my_gpu_node
+```
+
+### `slurm-resources`
+
+This tool connects to a login node, reads the cluster's node inventory with `scontrol show nodes`, and
+opens an interactive browser showing how many GPUs, CPUs, and how much RAM are free versus allocated.
+
+Nodes with identical hardware (GPU model and count, CPU count, memory, partitions) are grouped together,
+with GPU groups listed first. Nodes that cannot accept work (`DOWN`, `DRAIN`, `MAINT`, ...) are excluded
+from the free totals and shown with the reason they are out.
+
+#### Usage
+
+```bash
+slurm-resources [--host LOGIN_HOST] [--partition PARTITION] [--plain]
+```
+
+You start on the overview, one row per resource type, and drill into a group to see its nodes. On large
+clusters the node list is sorted with the emptiest nodes first, so the capacity you can actually use is
+always at the top.
+
+| Key | Action |
+| --- | --- |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move |
+| `→` or `Enter` | Open the selected group, or show node details |
+| `←` or `Backspace` | Go back |
+| `a` `f` `p` `u` `d` | Show all / free / partial / fully used / down nodes |
+| `/` | Search by node name |
+| `r` | Re-read the cluster |
+| `q` | Quit |
+
+#### Options
+
+- `--host`: Login node hostname used to run `scontrol` (default: "snellius01").
+- `--partition`: Only report nodes belonging to this partition.
+- `--plain`: Print a plain text report instead of opening the browser. This also happens automatically
+  when the output is piped or redirected, so `slurm-resources > report.txt` works as expected.
+- `--setup-completion`: Install `bash` or `zsh` completion and exit.
+- `--list-ssh-hosts`: Print the `Host` aliases found in the local SSH config and exit.
+
+#### Example
+
+```
+ Slurm resources on snellius01
+ GPUs 142/4344   CPUs 2356/71040   RAM 21.4T/1029.1T   nodes 551/557 usable
+ 2 resource groups
+
+› 8x h200      GPU  142/4344 ░░░░░░░░░░   3%  CPU  2272/69504   3%  RAM 20.2T/1018.1T  2%   549 nodes  1 free  34 partial  508 full  6 down
+    128 CPU, 1.9T RAM per node  ·  partitions: h200
+  CPU only                                        CPU    84/1536   5%  RAM   1.1T/11.0T  10%     8 nodes  2 partial  6 full
+    192 CPU, 1.4T RAM per node  ·  partitions: cpu
+```
+
+Pressing `→` on the `8x h200` row and then `p` narrows it to the partially used nodes:
+
+```
+ 8x h200  ·  filter: partial  ·  showing 34 of 549 nodes
+
+› h200-bar-196-013   partial   6/8 GPU  ██████░░   96/128 CPU  ██████░░   296G/1.9T RAM  █░░░░░░░
+  h200-bar-197-217   partial   6/8 GPU  ██████░░   96/128 CPU  ██████░░   634G/1.9T RAM  ███░░░░░
 ```

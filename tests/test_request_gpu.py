@@ -2,12 +2,20 @@ import contextlib
 import io
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from slurm_utils import request_gpu
+from slurm_utils import cli, request_gpu
+
+
+def write_config(directory, name, content):
+    path = os.path.join(directory, name)
+    with open(path, "w") as f:
+        f.write(content)
+    return path
 
 
 def subprocess_result(returncode=0, stdout="", stderr=""):
@@ -259,6 +267,53 @@ class RequestGpuTests(unittest.TestCase):
             request_gpu.get_extra_ssh_options(lines, "proxy", "~/.ssh/custom_key"),
             [("IdentityFile", "~/.ssh/custom_key"), ("IdentitiesOnly", "yes")],
         )
+
+    def test_parse_user_defaults_to_none(self):
+        args = request_gpu.parse_args([])
+
+        self.assertIsNone(args.user)
+
+    def test_resolve_ssh_user_reads_user_from_ssh_config(self):
+        result = subprocess_result(
+            stdout="host snellius.surf.nl\nuser spapa01\nuserknownhostsfile ~/.ssh/known_hosts\n"
+        )
+
+        with mock.patch.object(request_gpu.subprocess, "run", return_value=result) as run:
+            self.assertEqual(request_gpu.resolve_ssh_user("snellius01"), "spapa01")
+
+        self.assertEqual(run.call_args[0][0], ["ssh", "-G", "snellius01"])
+
+    def test_resolve_ssh_user_returns_none_when_ssh_fails(self):
+        result = subprocess_result(returncode=255, stderr="ssh: Bad configuration option\n")
+
+        with mock.patch.object(request_gpu.subprocess, "run", return_value=result):
+            self.assertIsNone(request_gpu.resolve_ssh_user("snellius01"))
+
+    def test_main_installs_completion(self):
+        output = io.StringIO()
+        with tempfile.TemporaryDirectory() as home:
+            config_dir = os.path.join(home, "cfg")
+            with mock.patch.dict(os.environ, {"ZDOTDIR": home}):
+                with mock.patch.object(cli, "get_config_dir", return_value=config_dir):
+                    with contextlib.redirect_stdout(output):
+                        request_gpu.main(["--setup-completion", "zsh"])
+
+            script_path = os.path.join(config_dir, "completion.request-gpu.zsh")
+            self.assertTrue(os.path.exists(script_path))
+            with open(os.path.join(home, ".zshrc")) as f:
+                self.assertIn(script_path, f.read())
+
+        self.assertIn(script_path, output.getvalue())
+
+    def test_main_lists_ssh_hosts(self):
+        output = io.StringIO()
+        with mock.patch.object(
+            cli, "list_ssh_config_hosts", return_value=["snellius01", "hipster"]
+        ):
+            with contextlib.redirect_stdout(output):
+                request_gpu.main(["--list-ssh-hosts"])
+
+        self.assertEqual(output.getvalue(), "snellius01\nhipster\n")
 
     def test_record_request_includes_identity_file_when_set(self):
         state = request_gpu.record_request(

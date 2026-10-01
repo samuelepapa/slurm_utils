@@ -25,6 +25,7 @@ Repository = "https://github.com/samuelepapa/slurm_utils"
 
 [project.scripts]
 request-gpu = "slurm_utils.request_gpu:main"
+slurm-resources = "slurm_utils.resources:main"
 
 [dependency-groups]
 dev = ["pytest>=7"]

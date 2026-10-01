@@ -7,32 +7,38 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from slurm_utils.cli import (
+    DEFAULT_SSH_CONFIG_PATH,
+    add_completion_arguments,
+    get_config_dir,
+    handle_completion_arguments,
+    list_ssh_config_hosts,
+)
+from slurm_utils.completion import FILE, SSH_HOST
 
+
+COMMAND_NAME = "request-gpu"
 DEFAULT_LOGIN_HOST = "snellius01"
-DEFAULT_USER = "spapa01"
 DEFAULT_SSH_NAME = "snellius_gpu_node"
-STATE_DIR_NAME = "slurm_utils"
 STATE_FILE_NAME = "request_gpu.json"
 COPIED_PROXY_OPTIONS = ("IdentityFile", "IdentitiesOnly")
+COMPLETERS = {"--host": SSH_HOST, "--proxy-host": SSH_HOST, "--identity-file": FILE}
 
 
-def parse_args(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if "--" in argv:
-        separator_index = argv.index("--")
-        utility_argv = argv[:separator_index]
-        sbatch_args = argv[separator_index + 1:]
-    else:
-        utility_argv = argv
-        sbatch_args = []
-
+def build_parser():
     parser = argparse.ArgumentParser(
+        prog=COMMAND_NAME,
         description=(
             "Request a Slurm allocation and update local SSH config. "
             "Pass all sbatch arguments after --."
-        )
+        ),
     )
-    parser.add_argument("--user", type=str, default=DEFAULT_USER, help="Username on the cluster")
+    parser.add_argument(
+        "--user",
+        type=str,
+        default=None,
+        help="Username on the cluster, default reads the User of the --host SSH config entry",
+    )
     parser.add_argument(
         "--host",
         type=str,
@@ -43,6 +49,7 @@ def parse_args(argv=None):
         "--ssh-name",
         type=str,
         default=None,
+        metavar="alias",
         help=f"Local SSH config Host alias, default auto-selects from '{DEFAULT_SSH_NAME}'",
     )
     parser.add_argument(
@@ -63,18 +70,48 @@ def parse_args(argv=None):
         default=None,
         help="Email address to notify when the Slurm job starts running",
     )
-    args = parser.parse_args(utility_argv)
+    return add_completion_arguments(parser)
+
+
+def parse_args(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--" in argv:
+        separator_index = argv.index("--")
+        utility_argv = argv[:separator_index]
+        sbatch_args = argv[separator_index + 1:]
+    else:
+        utility_argv = argv
+        sbatch_args = []
+
+    args = build_parser().parse_args(utility_argv)
     args.sbatch_args = sbatch_args
     args.proxy_host = args.proxy_host or args.host
     args.explicit_ssh_name = args.ssh_name is not None
     return args
 
 
+def resolve_ssh_user(host):
+    """Read the username SSH would use for a host from the local SSH config."""
+    result = subprocess.run(
+        ["ssh", "-G", host],
+        shell=False,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+
+    for line in result.stdout.splitlines():
+        keyword, _, value = line.partition(" ")
+        if keyword.lower() == "user" and value.strip():
+            return value.strip()
+    return None
+
+
 def get_state_path():
-    config_home = os.environ.get("XDG_CONFIG_HOME")
-    if not config_home:
-        config_home = os.path.expanduser("~/.config")
-    return os.path.join(config_home, STATE_DIR_NAME, STATE_FILE_NAME)
+    return os.path.join(get_config_dir(), STATE_FILE_NAME)
 
 
 def load_state(path=None):
@@ -318,7 +355,7 @@ def render_ssh_config(lines, ssh_name, node_name, user, proxy_host, extra_option
 
 def update_ssh_config(node_name, proxy_host, user, ssh_name, identity_file=None):
     """Updates the ~/.ssh/config file with the assigned node name. Creates it if missing."""
-    config_path = os.path.expanduser("~/.ssh/config")
+    config_path = os.path.expanduser(DEFAULT_SSH_CONFIG_PATH)
 
     if not os.path.exists(config_path):
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
@@ -342,6 +379,14 @@ def update_ssh_config(node_name, proxy_host, user, ssh_name, identity_file=None)
 def main(argv=None):
     args = parse_args(argv)
 
+    if handle_completion_arguments(args, COMMAND_NAME, build_parser(), COMPLETERS):
+        return
+
+    user = args.user or resolve_ssh_user(args.host)
+    if not user:
+        print(f"Error: could not resolve a username for host '{args.host}'. Pass --user explicitly.")
+        sys.exit(1)
+
     state = prune_state(load_state())
     try:
         args.ssh_name = select_ssh_name(state, args.ssh_name)
@@ -352,7 +397,7 @@ def main(argv=None):
 
     job_id = submit_job(args)
     node_name = get_job_node(args, job_id)
-    update_ssh_config(node_name, args.proxy_host, args.user, args.ssh_name, args.identity_file)
+    update_ssh_config(node_name, args.proxy_host, user, args.ssh_name, args.identity_file)
 
     state = record_request(
         state,
