@@ -1,6 +1,6 @@
 # Slurm Utilities
 
-This repository contains utility scripts for managing Slurm jobs, specifically tailored for the Snellius cluster.
+This repository contains utility scripts for managing Slurm jobs on a remote cluster you reach over SSH.
 
 ## Installation
 
@@ -67,11 +67,23 @@ The scripts are generated from each command's own argument parser, so they alway
 set. Options that take a hostname (`--host`, `--proxy-host`) complete from the `Host` aliases declared in
 `~/.ssh/config` and any files it `Include`s; `--list-ssh-hosts` prints that same list.
 
+## Configuration
+
+Both commands need the hostname of a login node that can run Slurm commands. Pass it with `--host`, or
+set it once so you never have to type it:
+
+```bash
+export SLURM_LOGIN_HOST=mycluster
+```
+
+The value is usually a `Host` alias from your `~/.ssh/config`, so that SSH already knows the real
+hostname, username, and jump host to use.
+
 ## Scripts
 
 ### `request_gpu`
 
-This tool automates the process of requesting a GPU node on Snellius and updating your local SSH configuration to allow direct access to the assigned node.
+This tool automates the process of requesting a GPU node on a Slurm cluster and updating your local SSH configuration to allow direct access to the assigned node.
 
 It performs the following steps:
 1. Submits an interactive-like job (sleeping) to the Slurm queue.
@@ -91,8 +103,8 @@ request-gpu [ssh-options] -- [sbatch-options]
 #### Options
 
 - `--user`: Username on the cluster. If omitted, it is taken from the `User` that SSH resolves for `--host`, which is your local username when the SSH config does not set one.
-- `--host`: Login node hostname used to run `sbatch` and `squeue` (default: "snellius01").
-- `--ssh-name`: Local SSH config alias to create or update. If omitted, the tool uses `snellius_gpu_node`, then `snellius_gpu_node_2`, and so on for multiple active requests.
+- `--host`: Login node hostname used to run `sbatch` and `squeue`. Defaults to the `SLURM_LOGIN_HOST` environment variable, and is required when that variable is not set.
+- `--ssh-name`: Local SSH config alias to create or update. If omitted, the tool uses `slurm_gpu_node`, then `slurm_gpu_node_2`, and so on for multiple active requests.
 - `--proxy-host`: Host to use as `ProxyJump` in new SSH config entries. If omitted, this defaults to `--host`.
 - `--identity-file`: SSH private key to write as `IdentityFile` in the generated SSH config entry. When omitted, matching identity settings are copied from the proxy host entry when available.
 - `--email`: Email address to notify when the Slurm job starts running. This adds Slurm's `--mail-user` and `--mail-type=BEGIN` options.
@@ -118,19 +130,19 @@ request-gpu --email you@example.com -- --partition=gpu --gres=gpu:1
 Use a custom SSH alias and tunnel proxy host:
 
 ```bash
-request-gpu --ssh-name my_gpu_node --proxy-host snellius-tunnel -- --partition=gpu --time=02:00:00 --gres=gpu:1
+request-gpu --ssh-name my_gpu_node --proxy-host cluster-tunnel -- --partition=gpu --time=02:00:00 --gres=gpu:1
 ```
 
 Use a custom SSH identity file:
 
 ```bash
-request-gpu --ssh-name hipster_2_gpus --host hipster --proxy-host hipster --identity-file ~/.ssh/id_rsa_cuteandcuter -- --gres=gpu:2
+request-gpu --ssh-name mycluster_2_gpus --host mycluster --proxy-host mycluster --identity-file ~/.ssh/id_rsa_cluster -- --gres=gpu:2
 ```
 
 After the script completes, you can SSH directly to the node:
 
 ```bash
-ssh snellius_gpu_node
+ssh slurm_gpu_node
 ```
 
 For the custom alias example:
@@ -170,7 +182,7 @@ always at the top.
 
 #### Options
 
-- `--host`: Login node hostname used to run `scontrol` (default: "snellius01").
+- `--host`: Login node hostname used to run `scontrol`. Defaults to the `SLURM_LOGIN_HOST` environment variable, and is required when that variable is not set.
 - `--partition`: Only report nodes belonging to this partition.
 - `--plain`: Print a plain text report instead of opening the browser. This also happens automatically
   when the output is piped or redirected, so `slurm-resources > report.txt` works as expected.
@@ -180,7 +192,7 @@ always at the top.
 #### Example
 
 ```
- Slurm resources on snellius01
+ Slurm resources on login01
  GPUs 142/4344   CPUs 2356/71040   RAM 21.4T/1029.1T   nodes 551/557 usable
  2 resource groups
 

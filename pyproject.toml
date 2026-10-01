@@ -4,8 +4,8 @@ build-backend = "uv_build"
 
 [project]
 name = "slurm_utils"
-version = "0.2.1"
-description = "Utility scripts for managing Slurm jobs on Snellius"
+version = "0.3.0"
+description = "Utility scripts for managing Slurm jobs on remote clusters"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

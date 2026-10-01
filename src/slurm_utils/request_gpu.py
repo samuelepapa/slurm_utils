@@ -18,8 +18,8 @@ from slurm_utils.completion import FILE, SSH_HOST
 
 
 COMMAND_NAME = "request-gpu"
-DEFAULT_LOGIN_HOST = "snellius01"
-DEFAULT_SSH_NAME = "snellius_gpu_node"
+LOGIN_HOST_ENV_VAR = "SLURM_LOGIN_HOST"
+DEFAULT_SSH_NAME = "slurm_gpu_node"
 STATE_FILE_NAME = "request_gpu.json"
 COPIED_PROXY_OPTIONS = ("IdentityFile", "IdentitiesOnly")
 COMPLETERS = {"--host": SSH_HOST, "--proxy-host": SSH_HOST, "--identity-file": FILE}
@@ -42,8 +42,8 @@ def build_parser():
     parser.add_argument(
         "--host",
         type=str,
-        default=DEFAULT_LOGIN_HOST,
-        help="Login node hostname used for sbatch and squeue",
+        default=os.environ.get(LOGIN_HOST_ENV_VAR),
+        help=f"Login node hostname used for sbatch and squeue, default reads ${LOGIN_HOST_ENV_VAR}",
     )
     parser.add_argument(
         "--ssh-name",
@@ -381,6 +381,10 @@ def main(argv=None):
 
     if handle_completion_arguments(args, COMMAND_NAME, build_parser(), COMPLETERS):
         return
+
+    if not args.host:
+        print(f"Error: no login node. Pass --host or set ${LOGIN_HOST_ENV_VAR}.")
+        sys.exit(1)
 
     user = args.user or resolve_ssh_user(args.host)
     if not user:

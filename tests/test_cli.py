@@ -33,19 +33,19 @@ class SshConfigTests(unittest.TestCase):
                 directory,
                 "config",
                 "# comment\n"
-                "Host snellius01 snellius02\n"
-                "  User spapa01\n"
+                "Host login01 login02\n"
+                "  User alice\n"
                 "Host *\n"
                 "  ForwardAgent yes\n"
                 "Host gpu_?\n"
-                "Match host hipster\n"
-                "  User spapa\n"
-                "Host hipster\n",
+                "Match host othercluster\n"
+                "  User alice\n"
+                "Host othercluster\n",
             )
 
             self.assertEqual(
                 cli.list_ssh_config_hosts(path),
-                ["snellius01", "snellius02", "hipster"],
+                ["login01", "login02", "othercluster"],
             )
 
     def test_list_ssh_config_hosts_follows_includes(self):

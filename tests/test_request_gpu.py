@@ -105,12 +105,12 @@ class RequestGpuTests(unittest.TestCase):
     def test_select_ssh_name_uses_numbered_aliases(self):
         state = {
             "requests": [
-                {"ssh_name": "snellius_gpu_node"},
-                {"ssh_name": "snellius_gpu_node_2"},
+                {"ssh_name": "slurm_gpu_node"},
+                {"ssh_name": "slurm_gpu_node_2"},
             ]
         }
 
-        self.assertEqual(request_gpu.select_ssh_name(state), "snellius_gpu_node_3")
+        self.assertEqual(request_gpu.select_ssh_name(state), "slurm_gpu_node_3")
 
     def test_select_ssh_name_rejects_explicit_active_alias(self):
         state = {"requests": [{"ssh_name": "custom_gpu"}]}
@@ -148,24 +148,24 @@ class RequestGpuTests(unittest.TestCase):
 
     def test_render_ssh_config_updates_existing_host_name(self):
         lines = [
-            "Host snellius_gpu_node\n",
+            "Host slurm_gpu_node\n",
             "    HostName oldnode\n",
-            "    User spapa01\n",
-            "    ProxyJump snellius01\n",
+            "    User alice\n",
+            "    ProxyJump login01\n",
         ]
 
         rendered, found = request_gpu.render_ssh_config(
-            lines, "snellius_gpu_node", "newnode", "spapa01", "proxy"
+            lines, "slurm_gpu_node", "newnode", "alice", "proxy"
         )
 
         self.assertTrue(found)
         self.assertEqual(
             rendered,
             [
-                "Host snellius_gpu_node\n",
+                "Host slurm_gpu_node\n",
                 "    HostName newnode\n",
-                "    User spapa01\n",
-                "    ProxyJump snellius01\n",
+                "    User alice\n",
+                "    ProxyJump login01\n",
             ],
         )
 
@@ -217,18 +217,18 @@ class RequestGpuTests(unittest.TestCase):
 
     def test_get_copied_proxy_options_reads_auth_options(self):
         lines = [
-            "Host hipster\n",
-            "  HostName hipster.science.uva.nl\n",
-            "  User spapa\n",
-            "  IdentityFile ~/.ssh/id_rsa_cuteandcuter\n",
+            "Host othercluster\n",
+            "  HostName othercluster.example.com\n",
+            "  User alice\n",
+            "  IdentityFile ~/.ssh/id_rsa_other\n",
             "  IdentitiesOnly yes\n",
             "  ForwardAgent yes\n",
         ]
 
         self.assertEqual(
-            request_gpu.get_copied_proxy_options(lines, "hipster"),
+            request_gpu.get_copied_proxy_options(lines, "othercluster"),
             [
-                ("IdentityFile", "~/.ssh/id_rsa_cuteandcuter"),
+                ("IdentityFile", "~/.ssh/id_rsa_other"),
                 ("IdentitiesOnly", "yes"),
             ],
         )
@@ -240,7 +240,7 @@ class RequestGpuTests(unittest.TestCase):
             "node2",
             "user",
             "proxy",
-            [("IdentityFile", "~/.ssh/id_rsa_cuteandcuter"), ("IdentitiesOnly", "yes")],
+            [("IdentityFile", "~/.ssh/id_rsa_other"), ("IdentitiesOnly", "yes")],
         )
 
         self.assertFalse(found)
@@ -251,7 +251,7 @@ class RequestGpuTests(unittest.TestCase):
                 "    HostName node2\n",
                 "    User user\n",
                 "    ProxyJump proxy\n",
-                "    IdentityFile ~/.ssh/id_rsa_cuteandcuter\n",
+                "    IdentityFile ~/.ssh/id_rsa_other\n",
                 "    IdentitiesOnly yes\n",
             ],
         )
@@ -273,21 +273,36 @@ class RequestGpuTests(unittest.TestCase):
 
         self.assertIsNone(args.user)
 
+    def test_parse_host_reads_the_login_host_environment_variable(self):
+        with mock.patch.dict(os.environ, {request_gpu.LOGIN_HOST_ENV_VAR: "login01"}):
+            args = request_gpu.parse_args([])
+
+        self.assertEqual(args.host, "login01")
+
+    def test_main_fails_without_a_login_host(self):
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit):
+                    request_gpu.main([])
+
+        self.assertIn("--host", output.getvalue())
+
     def test_resolve_ssh_user_reads_user_from_ssh_config(self):
         result = subprocess_result(
-            stdout="host snellius.surf.nl\nuser spapa01\nuserknownhostsfile ~/.ssh/known_hosts\n"
+            stdout="host login01.example.com\nuser alice\nuserknownhostsfile ~/.ssh/known_hosts\n"
         )
 
         with mock.patch.object(request_gpu.subprocess, "run", return_value=result) as run:
-            self.assertEqual(request_gpu.resolve_ssh_user("snellius01"), "spapa01")
+            self.assertEqual(request_gpu.resolve_ssh_user("login01"), "alice")
 
-        self.assertEqual(run.call_args[0][0], ["ssh", "-G", "snellius01"])
+        self.assertEqual(run.call_args[0][0], ["ssh", "-G", "login01"])
 
     def test_resolve_ssh_user_returns_none_when_ssh_fails(self):
         result = subprocess_result(returncode=255, stderr="ssh: Bad configuration option\n")
 
         with mock.patch.object(request_gpu.subprocess, "run", return_value=result):
-            self.assertIsNone(request_gpu.resolve_ssh_user("snellius01"))
+            self.assertIsNone(request_gpu.resolve_ssh_user("login01"))
 
     def test_main_installs_completion(self):
         output = io.StringIO()
@@ -308,12 +323,12 @@ class RequestGpuTests(unittest.TestCase):
     def test_main_lists_ssh_hosts(self):
         output = io.StringIO()
         with mock.patch.object(
-            cli, "list_ssh_config_hosts", return_value=["snellius01", "hipster"]
+            cli, "list_ssh_config_hosts", return_value=["login01", "othercluster"]
         ):
             with contextlib.redirect_stdout(output):
                 request_gpu.main(["--list-ssh-hosts"])
 
-        self.assertEqual(output.getvalue(), "snellius01\nhipster\n")
+        self.assertEqual(output.getvalue(), "login01\nothercluster\n")
 
     def test_record_request_includes_identity_file_when_set(self):
         state = request_gpu.record_request(

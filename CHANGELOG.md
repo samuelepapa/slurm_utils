@@ -5,11 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-01
 
 ### Changed
 - Switched the build backend to `uv_build` so the package can be installed system-wide with `uv tool install`.
 - Raised the minimum Python version to 3.9.
+- `--host` no longer defaults to a hardcoded cluster login node. It now defaults to the `SLURM_LOGIN_HOST` environment variable and is required when that variable is not set, in both `request-gpu` and `slurm-resources`.
+- The default SSH alias created by `request-gpu` is now `slurm_gpu_node` instead of a cluster-specific name.
 - `--user` is now optional: the cluster username is read from the SSH config entry of `--host` instead of defaulting to a hardcoded account.
 - Shell completion scripts are now generated from each command's argument parser instead of being hardcoded for `request-gpu`, so every command gets `--setup-completion` and `--list-ssh-hosts` and can never drift from its own options.
 - Completion scripts are now written to `~/.config/slurm_utils/completion.<command>.<shell>` so commands do not overwrite each other. If you installed completion before this change, remove the line sourcing the old `completion.<shell>` file from your shell rc.
@@ -42,12 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.1] - 2025-02-04
 
 ### Fixed
-- Fixed issue where `request-gpu` would fail if `~/.ssh/config` did not already have a `Host snellius_gpu_node` block.
+- Fixed issue where `request-gpu` would fail if `~/.ssh/config` did not already have the default GPU node `Host` block.
 - Added automatic creation of the SSH config block with `ProxyJump` tunneling through the login node.
 
 ## [0.1.0] - 2025-02-04
 
 ### Added
 - Initial release.
-- `request-gpu` command line tool for requesting GPU nodes on Snellius.
+- `request-gpu` command line tool for requesting GPU nodes on a Slurm cluster.
 - Automatic SSH config updating (HostName only).

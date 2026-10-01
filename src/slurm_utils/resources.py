@@ -1,6 +1,7 @@
 """Report available and allocated GPU, CPU, and memory resources on a Slurm cluster."""
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from slurm_utils.cli import add_completion_arguments, handle_completion_argument
 from slurm_utils.completion import SSH_HOST
 
 COMMAND_NAME = "slurm-resources"
-DEFAULT_LOGIN_HOST = "snellius01"
+LOGIN_HOST_ENV_VAR = "SLURM_LOGIN_HOST"
 COMPLETERS = {"--host": SSH_HOST}
 
 # States in which a node cannot accept new work, so its idle resources are not really free.
@@ -46,8 +47,8 @@ def build_parser():
     parser.add_argument(
         "--host",
         type=str,
-        default=DEFAULT_LOGIN_HOST,
-        help="Login node hostname used to run scontrol",
+        default=os.environ.get(LOGIN_HOST_ENV_VAR),
+        help=f"Login node hostname used to run scontrol, default reads ${LOGIN_HOST_ENV_VAR}",
     )
     parser.add_argument(
         "--partition",
@@ -343,6 +344,9 @@ def main(argv=None):
 
     if handle_completion_arguments(args, COMMAND_NAME, parser, COMPLETERS):
         return
+
+    if not args.host:
+        parser.error(f"no login node: pass --host or set ${LOGIN_HOST_ENV_VAR}")
 
     def load():
         nodes = fetch_nodes(args.host)
