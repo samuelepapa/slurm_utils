@@ -4,7 +4,13 @@ import curses
 import locale
 from collections import Counter
 
-from slurm_utils.resources import classify, format_memory, group_nodes
+from slurm_utils.resources import (
+    classify,
+    describe_hardware,
+    format_memory,
+    group_nodes,
+    partition_label,
+)
 
 BUCKETS = ("free", "partial", "full", "unavailable")
 BUCKET_RANK = {name: index for index, name in enumerate(BUCKETS)}
@@ -53,13 +59,11 @@ def summarize(nodes):
 
 
 def group_label(key):
-    gpu_type, gpu_total, _, _, _ = key
-    return f"{gpu_total}x {gpu_type or 'gpu'}" if gpu_total else "CPU only"
+    return partition_label(key)
 
 
 def group_row(key, nodes):
     """One line summarizing a hardware group, as (text, colour kind)."""
-    _, gpu_total, cpu_total, mem_total, partitions = key
     stats = summarize(nodes)
     counts = stats["counts"]
 
@@ -81,10 +85,7 @@ def group_row(key, nodes):
         f"{group_label(key):<12}  {gpu_cell}  {cpu_cell}  {mem_cell}  "
         f"{stats['nodes']:>4} nodes  {tally}"
     )
-    detail = (
-        f"{cpu_total} CPU, {format_memory(mem_total)} RAM per node"
-        f"  ·  partitions: {','.join(partitions) or 'none'}"
-    )
+    detail = describe_hardware(nodes)
     kind = "free" if stats["gpu_free"] or stats["cpu_free"] else "full"
     return text, detail, kind
 
@@ -212,7 +213,7 @@ class Browser:
                 groups = [g for g in groups if needle in group_label(g[0]).lower()]
             return [(*group_row(*group), group) for group in groups]
 
-        show_gpu = bool(self.current_group[0][1])
+        show_gpu = any(node["gpu_total"] for node in self.current_group[1])
         rows = []
         for node in self.visible_nodes():
             text, kind = node_row(node, show_gpu)
@@ -259,7 +260,7 @@ class Browser:
         self.write(1, 1, summary, curses.A_BOLD)
 
         if self.level == "groups":
-            crumb = f"{len(self.groups)} resource groups"
+            crumb = f"{len(self.groups)} partitions"
         else:
             key, group = self.current_group
             crumb = (

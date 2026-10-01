@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-01
+
+### Changed
+- `slurm-resources` now groups nodes by partition instead of by exact hardware. Identical nodes whose reported `RealMemory` differed by a few MB were split into separate, identical-looking groups; each group now describes its nodes' hardware instead.
+
 ## [0.3.0] - 2026-10-01
 
 ### Changed

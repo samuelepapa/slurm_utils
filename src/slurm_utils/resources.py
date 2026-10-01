@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import sys
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 
 from slurm_utils.cli import add_completion_arguments, handle_completion_arguments
 from slurm_utils.completion import SSH_HOST
@@ -209,27 +209,35 @@ def compress_hostlist(names):
     return ",".join(parts + plain)
 
 
-def group_key(node):
-    return (
-        node["gpu_type"] or "",
-        node["gpu_total"],
-        node["cpu_total"],
-        int(node["mem_total"]),
-        node["partitions"],
-    )
-
-
 def group_nodes(nodes):
-    """Group nodes by identical hardware, GPU groups first."""
+    """Group nodes by partition, partitions with GPUs first."""
     groups = OrderedDict()
     for node in nodes:
-        groups.setdefault(group_key(node), []).append(node)
+        groups.setdefault(node["partitions"], []).append(node)
 
     def sort_key(item):
-        gpu_type, gpu_total, cpu_total, mem_total, partitions = item[0]
-        return (0 if gpu_total else 1, gpu_type, -gpu_total, -cpu_total, -mem_total, partitions)
+        partitions, members = item
+        has_gpu = any(node["gpu_total"] for node in members)
+        return (0 if has_gpu else 1, partitions)
 
     return sorted(groups.items(), key=sort_key)
+
+
+def partition_label(partitions):
+    return ",".join(partitions) or "no partition"
+
+
+def hardware_label(node):
+    gpu = f"{node['gpu_total']}x {node['gpu_type'] or 'gpu'}" if node["gpu_total"] else "no GPU"
+    return f"{gpu}, {node['cpu_total']} CPU, {format_memory(node['mem_total'])} RAM"
+
+
+def describe_hardware(nodes):
+    """Per-node hardware of a group, listing each kind when the nodes differ."""
+    kinds = Counter(hardware_label(node) for node in nodes)
+    if len(kinds) == 1:
+        return f"{next(iter(kinds))} per node"
+    return "; ".join(f"{count}x node with {label}" for label, count in kinds.most_common())
 
 
 def classify(node):
@@ -266,14 +274,7 @@ def describe_free(node):
 
 
 def format_group(key, nodes):
-    gpu_type, gpu_total, cpu_total, mem_total, partitions = key
-    if gpu_total:
-        label = f"{gpu_total}x {gpu_type or 'gpu'}"
-    else:
-        label = "no GPU"
-    header = f"{label}  |  {cpu_total} CPU, {format_memory(mem_total)} RAM per node"
-    if partitions:
-        header += f"  |  partitions: {','.join(partitions)}"
+    header = f"partition: {partition_label(key)}  |  {describe_hardware(nodes)}"
 
     buckets = OrderedDict((name, []) for name in ("free", "partial", "full", "unavailable"))
     for node in sorted(nodes, key=lambda n: n["name"]):
@@ -286,11 +287,15 @@ def format_group(key, nodes):
 
     lines = [header, "-" * len(header)]
 
+    total_gpus = sum(node["gpu_total"] for node in schedulable)
+    total_cpus = sum(node["cpu_total"] for node in schedulable)
+    total_mem = sum(node["mem_total"] for node in schedulable)
+
     available = []
-    if gpu_total:
-        available.append(f"{free_gpus}/{gpu_total * len(schedulable)} GPUs")
-    available.append(f"{free_cpus}/{cpu_total * len(schedulable)} CPUs")
-    available.append(f"{format_memory(free_mem)}/{format_memory(mem_total * len(schedulable))} RAM")
+    if any(node["gpu_total"] for node in nodes):
+        available.append(f"{free_gpus}/{total_gpus} GPUs")
+    available.append(f"{free_cpus}/{total_cpus} CPUs")
+    available.append(f"{format_memory(free_mem)}/{format_memory(total_mem)} RAM")
     lines.append("available: " + ", ".join(available))
 
     counts = ", ".join(f"{len(bucket)} {name}" for name, bucket in buckets.items() if bucket)

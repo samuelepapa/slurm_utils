@@ -74,21 +74,33 @@ class ParsingTests(unittest.TestCase):
 
 
 class GroupingTests(unittest.TestCase):
-    def test_gpu_groups_come_before_cpu_only_groups(self):
+    def test_gpu_partitions_come_before_cpu_only_partitions(self):
         nodes = resources.parse_nodes("\n".join([CPU_NODE, GPU_NODE]))
 
         groups = resources.group_nodes(nodes)
 
-        self.assertEqual(groups[0][0][0], "a100")
-        self.assertEqual(groups[1][0][1], 0)
+        self.assertEqual([key for key, _ in groups], [("gpu",), ("cpu",)])
 
-    def test_identical_nodes_share_a_group(self):
-        nodes = resources.parse_nodes("\n".join([GPU_NODE, IDLE_GPU_NODE]))
+    def test_nodes_in_a_partition_share_a_group_despite_small_memory_differences(self):
+        other = GPU_NODE.replace("NodeName=gcn1", "NodeName=gcn9").replace(
+            "RealMemory=491520", "RealMemory=491519"
+        )
+        nodes = resources.parse_nodes("\n".join([GPU_NODE, IDLE_GPU_NODE, other]))
 
         groups = resources.group_nodes(nodes)
 
         self.assertEqual(len(groups), 1)
-        self.assertEqual(len(groups[0][1]), 2)
+        self.assertEqual(len(groups[0][1]), 3)
+        self.assertEqual(resources.describe_hardware(groups[0][1]), "4x a100, 72 CPU, 480G RAM per node")
+
+    def test_describe_hardware_lists_each_kind_in_a_mixed_partition(self):
+        cpu = CPU_NODE.replace("Partitions=cpu", "Partitions=gpu")
+        nodes = resources.parse_nodes("\n".join([GPU_NODE, IDLE_GPU_NODE, cpu]))
+
+        description = resources.describe_hardware(nodes)
+
+        self.assertIn("2x node with 4x a100", description)
+        self.assertIn("1x node with no GPU", description)
 
     def test_classify(self):
         gpu, idle, cpu, down = resources.parse_nodes(
@@ -116,11 +128,11 @@ class ReportTests(unittest.TestCase):
 
         report = resources.format_report(nodes)
 
-        self.assertIn("4x a100", report)
+        self.assertIn("partition: gpu  |  4x a100", report)
         self.assertIn("available: 7/8 GPUs", report)
         self.assertIn("free      gcn2", report)
         self.assertIn("partial   gcn1", report)
-        self.assertIn("no GPU", report)
+        self.assertIn("partition: cpu  |  no GPU", report)
         self.assertIn("down      gcn3", report)
         self.assertIn("hardware fault", report)
         self.assertIn("TOTAL available: 7/8 GPUs", report)

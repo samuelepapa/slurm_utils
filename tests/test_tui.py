@@ -50,22 +50,22 @@ class SummaryTests(unittest.TestCase):
 
     def test_group_label(self):
         (gpu_key, _), = [(key, nodes) for key, nodes in resources.group_nodes(NODES)]
-        self.assertEqual(tui.group_label(gpu_key), "4x a100")
-        self.assertEqual(tui.group_label(("", 0, 128, 1024, ())), "CPU only")
+        self.assertEqual(tui.group_label(gpu_key), "gpu")
+        self.assertEqual(tui.group_label(("gpu", "debug")), "gpu,debug")
+        self.assertEqual(tui.group_label(()), "no partition")
 
     def test_group_row_reports_free_counts_and_tally(self):
         key, nodes = resources.group_nodes(NODES)[0]
 
         text, detail, _ = tui.group_row(key, nodes)
 
-        self.assertIn("4x a100", text)
+        self.assertIn("gpu", text)
         self.assertIn("7/12", text)
         self.assertIn("1 free", text)
         self.assertIn("1 partial", text)
         self.assertIn("1 full", text)
         self.assertIn("1 down", text)
-        self.assertIn("72 CPU, 480G RAM per node", detail)
-        self.assertIn("partitions: gpu", detail)
+        self.assertEqual(detail, "4x a100, 72 CPU, 480G RAM per node")
 
 
 class NodeRowTests(unittest.TestCase):

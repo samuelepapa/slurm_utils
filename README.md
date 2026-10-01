@@ -156,8 +156,8 @@ ssh my_gpu_node
 This tool connects to a login node, reads the cluster's node inventory with `scontrol show nodes`, and
 opens an interactive browser showing how many GPUs, CPUs, and how much RAM are free versus allocated.
 
-Nodes with identical hardware (GPU model and count, CPU count, memory, partitions) are grouped together,
-with GPU groups listed first. Nodes that cannot accept work (`DOWN`, `DRAIN`, `MAINT`, ...) are excluded
+Nodes are grouped by partition, with partitions that have GPUs listed first. Each group shows the
+hardware of its nodes, and lists every kind separately when a partition mixes different machines. Nodes that cannot accept work (`DOWN`, `DRAIN`, `MAINT`, ...) are excluded
 from the free totals and shown with the reason they are out.
 
 #### Usage
@@ -166,7 +166,7 @@ from the free totals and shown with the reason they are out.
 slurm-resources [--host LOGIN_HOST] [--partition PARTITION] [--plain]
 ```
 
-You start on the overview, one row per resource type, and drill into a group to see its nodes. On large
+You start on the overview, one row per partition, and drill into a group to see its nodes. On large
 clusters the node list is sorted with the emptiest nodes first, so the capacity you can actually use is
 always at the top.
 
@@ -194,18 +194,18 @@ always at the top.
 ```
  Slurm resources on login01
  GPUs 142/4344   CPUs 2356/71040   RAM 21.4T/1029.1T   nodes 551/557 usable
- 2 resource groups
+ 2 partitions
 
-› 8x h200      GPU  142/4344 ░░░░░░░░░░   3%  CPU  2272/69504   3%  RAM 20.2T/1018.1T  2%   549 nodes  1 free  34 partial  508 full  6 down
-    128 CPU, 1.9T RAM per node  ·  partitions: h200
-  CPU only                                        CPU    84/1536   5%  RAM   1.1T/11.0T  10%     8 nodes  2 partial  6 full
-    192 CPU, 1.4T RAM per node  ·  partitions: cpu
+› h200         GPU  142/4344 ░░░░░░░░░░   3%  CPU  2272/69504   3%  RAM 20.2T/1018.1T  2%   549 nodes  1 free  34 partial  508 full  6 down
+    8x h200, 128 CPU, 1.9T RAM per node
+  cpu                                             CPU    84/1536   5%  RAM   1.1T/11.0T  10%     8 nodes  2 partial  6 full
+    no GPU, 192 CPU, 1.4T RAM per node
 ```
 
-Pressing `→` on the `8x h200` row and then `p` narrows it to the partially used nodes:
+Pressing `→` on the `h200` row and then `p` narrows it to the partially used nodes:
 
 ```
- 8x h200  ·  filter: partial  ·  showing 34 of 549 nodes
+ h200  ·  filter: partial  ·  showing 34 of 549 nodes
 
 › h200-bar-196-013   partial   6/8 GPU  ██████░░   96/128 CPU  ██████░░   296G/1.9T RAM  █░░░░░░░
   h200-bar-197-217   partial   6/8 GPU  ██████░░   96/128 CPU  ██████░░   634G/1.9T RAM  ███░░░░░
