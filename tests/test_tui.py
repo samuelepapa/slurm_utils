@@ -128,5 +128,32 @@ class DetailTests(unittest.TestCase):
         self.assertNotIn("Reason", "\n".join(tui.node_detail_lines(node)))
 
 
+class JobLinesTests(unittest.TestCase):
+    JOBS = resources.parse_jobs(
+        "4242|alice|RUNNING|1:02:03|2-00:00:00|16|120G|gres/gpu:a100:1|train model\n"
+        "4243_7|bob|RUNNING|0:05|1:00:00|8|32G|N/A|eval\n"
+    )
+
+    def test_table_has_a_header_and_one_row_per_job(self):
+        lines = tui.job_lines(self.JOBS)
+
+        self.assertEqual(lines[0], "Jobs (2)")
+        self.assertTrue(lines[1].startswith("JOBID"))
+        self.assertIn("alice", lines[2])
+        self.assertIn("gpu:a100:1", lines[2])
+        self.assertTrue(lines[2].endswith("train model"))
+        self.assertTrue(lines[3].startswith("4243_7"))
+
+    def test_columns_line_up(self):
+        lines = tui.job_lines(self.JOBS)
+
+        self.assertEqual(lines[1].index("USER"), lines[2].index("alice"))
+        self.assertEqual(lines[2].index("alice"), lines[3].index("bob"))
+
+    def test_empty_and_failed_job_lists(self):
+        self.assertIn("no jobs", tui.job_lines([])[1])
+        self.assertIn("timed out", tui.job_lines(None, "timed out")[1])
+
+
 if __name__ == "__main__":
     unittest.main()

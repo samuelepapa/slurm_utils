@@ -3,6 +3,7 @@
 import argparse
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections import Counter, OrderedDict
@@ -37,6 +38,10 @@ KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*=")
 TRAILING_NUMBER_RE = re.compile(r"^(.*?)(\d+)$")
 MEMORY_RE = re.compile(r"^([0-9.]+)\s*([KMGTP])?", re.IGNORECASE)
 MEMORY_UNITS = {"K": 1.0 / 1024, "M": 1.0, "G": 1024.0, "T": 1024.0 ** 2, "P": 1024.0 ** 3}
+
+# squeue fields for the jobs on one node; the name goes last because it is the only one that can contain the separator.
+JOB_FIELDS = ("id", "user", "state", "time", "limit", "cpus", "mem", "gres", "name")
+JOB_FORMAT = "%i|%u|%T|%M|%l|%C|%m|%b|%j"
 
 
 def build_parser():
@@ -159,10 +164,9 @@ def parse_nodes(text):
     return nodes
 
 
-def fetch_nodes(host):
-    ssh_cmd = ["ssh", host, "scontrol show nodes --oneliner"]
+def run_remote(host, command, what):
     result = subprocess.run(
-        ssh_cmd,
+        ["ssh", host, command],
         shell=False,
         check=False,
         stdout=subprocess.PIPE,
@@ -171,8 +175,32 @@ def fetch_nodes(host):
     )
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "unknown error"
-        raise RuntimeError(f"could not read node information from '{host}': {message}")
-    return parse_nodes(result.stdout)
+        raise RuntimeError(f"could not read {what} from '{host}': {message}")
+    return result.stdout
+
+
+def fetch_nodes(host):
+    return parse_nodes(run_remote(host, "scontrol show nodes --oneliner", "node information"))
+
+
+def parse_jobs(text):
+    jobs = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        values = line.split("|", len(JOB_FIELDS) - 1)
+        if len(values) != len(JOB_FIELDS):
+            continue
+        job = dict(zip(JOB_FIELDS, (value.strip() for value in values)))
+        gres = job["gres"].replace("gres/", "")
+        job["gres"] = "" if gres in ("N/A", "(null)") else gres
+        jobs.append(job)
+    return jobs
+
+
+def fetch_jobs(host, node_name):
+    command = f"squeue --noheader --nodelist={shlex.quote(node_name)} --format='{JOB_FORMAT}'"
+    return parse_jobs(run_remote(host, command, f"jobs on {node_name}"))
 
 
 def compress_hostlist(names):
@@ -375,7 +403,7 @@ def main(argv=None):
 
     from slurm_utils.tui import run
 
-    run(nodes, args.host, load)
+    run(nodes, args.host, load, lambda node_name: fetch_jobs(args.host, node_name))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ FILTERS = {"a": None, "f": "free", "p": "partial", "u": "full", "d": "unavailabl
 
 GROUPS_HELP = "↑↓ move · → open · / search · r refresh · q quit"
 NODES_HELP = "↑↓ move · → details · ← back · a/f/p/u/d filter · / search · r refresh · q quit"
-DETAIL_HELP = "← or esc back · q quit"
+DETAIL_HELP = "↑↓ scroll · r reload jobs · ← or esc back · q quit"
 
 COLORS = {
     "free": 1,
@@ -29,6 +29,18 @@ COLORS = {
     "header": 5,
     "dim": 6,
 }
+
+JOB_COLUMNS = (
+    ("JOBID", "id"),
+    ("USER", "user"),
+    ("STATE", "state"),
+    ("TIME", "time"),
+    ("LIMIT", "limit"),
+    ("CPUS", "cpus"),
+    ("MEM", "mem"),
+    ("GRES", "gres"),
+    ("NAME", "name"),
+)
 
 
 def bar(free, total, width=10):
@@ -175,11 +187,37 @@ def node_detail_lines(node):
     return lines
 
 
+def job_lines(jobs, error=None):
+    """The jobs section of the node detail view; the first two lines are headings."""
+    if error:
+        return ["Jobs", f"  could not load jobs: {error}"]
+    if jobs is None:
+        return ["Jobs", "  loading..."]
+    if not jobs:
+        return ["Jobs (0)", "  no jobs running on this node"]
+
+    widths = [
+        max(len(title), *(len(job[field] or "-") for job in jobs))
+        for title, field in JOB_COLUMNS
+    ]
+
+    def line(cells):
+        return "  ".join(cell.ljust(width) for cell, width in zip(cells, widths)).rstrip()
+
+    lines = [f"Jobs ({len(jobs)})", line(title for title, _ in JOB_COLUMNS)]
+    lines.extend(line(job[field] or "-" for _, field in JOB_COLUMNS) for job in jobs)
+    return lines
+
+
 class Browser:
-    def __init__(self, screen, nodes, host, reload_nodes=None):
+    def __init__(self, screen, nodes, host, reload_nodes=None, load_jobs=None):
         self.screen = screen
         self.host = host
         self.reload_nodes = reload_nodes
+        self.load_jobs = load_jobs
+        self.jobs = None
+        self.jobs_error = None
+        self.detail_offset = 0
         self.status = ""
         self.set_nodes(nodes)
 
@@ -309,11 +347,23 @@ class Browser:
             if line >= top + body_height:
                 break
 
-    def draw_detail(self, node, top, body_height):
-        for offset, line in enumerate(node_detail_lines(node)):
-            if offset >= body_height:
-                break
-            attr = curses.A_BOLD if offset == 0 else 0
+    def detail_lines(self):
+        """Lines of the node detail view as (text, attr)."""
+        lines = [(line, 0) for line in node_detail_lines(self.selected_node)]
+        lines[0] = (lines[0][0], curses.A_BOLD)
+        if self.load_jobs:
+            jobs = job_lines(self.jobs, self.jobs_error)
+            lines.append(("", 0))
+            lines.append((jobs[0], curses.A_BOLD))
+            lines.append((jobs[1], self.color("dim") if self.jobs else 0))
+            lines.extend((line, 0) for line in jobs[2:])
+        return lines
+
+    def draw_detail(self, top, body_height):
+        lines = self.detail_lines()
+        self.detail_offset = max(0, min(self.detail_offset, len(lines) - body_height))
+        visible = lines[self.detail_offset:self.detail_offset + body_height]
+        for offset, (line, attr) in enumerate(visible):
             self.write(top + offset, 2, line, attr)
 
     def draw(self):
@@ -324,7 +374,7 @@ class Browser:
         body_height = max(1, height - top - 1)
 
         if self.level == "detail":
-            self.draw_detail(self.selected_node, top, body_height)
+            self.draw_detail(top, body_height)
         else:
             rows = self.rows()
             if self.level == "groups":
@@ -366,6 +416,25 @@ class Browser:
         self.set_nodes(nodes)
         self.status = ""
 
+    def open_detail(self, node):
+        self.selected_node = node
+        self.level = "detail"
+        self.detail_offset = 0
+        self.refresh_jobs()
+
+    def refresh_jobs(self):
+        self.jobs = None
+        self.jobs_error = None
+        if not self.load_jobs:
+            return
+        self.status = f"Loading jobs on {self.selected_node['name']}..."
+        self.draw()
+        try:
+            self.jobs = self.load_jobs(self.selected_node["name"])
+        except RuntimeError as error:
+            self.jobs_error = str(error)
+        self.status = ""
+
     def handle(self, key, body_height):
         count = len(self.rows()) if self.level != "detail" else 0
 
@@ -379,6 +448,18 @@ class Browser:
         if self.level == "detail":
             if key in (curses.KEY_LEFT, 27, curses.KEY_BACKSPACE, 127, 8, 10, 13):
                 self.level = "nodes"
+            elif key in (curses.KEY_DOWN, ord("j")):
+                self.detail_offset += 1
+            elif key in (curses.KEY_UP, ord("k")):
+                self.detail_offset = max(0, self.detail_offset - 1)
+            elif key == curses.KEY_NPAGE:
+                self.detail_offset += body_height
+            elif key == curses.KEY_PPAGE:
+                self.detail_offset = max(0, self.detail_offset - body_height)
+            elif key == curses.KEY_HOME:
+                self.detail_offset = 0
+            elif key in (ord("r"), ord("R")):
+                self.refresh_jobs()
             return True
 
         if key in (curses.KEY_DOWN, ord("j")):
@@ -400,8 +481,7 @@ class Browser:
                 self.offset = 0
                 self.search = ""
             elif self.level == "nodes" and count:
-                self.selected_node = self.rows()[self.node_index][3]
-                self.level = "detail"
+                self.open_detail(self.rows()[self.node_index][3])
         elif key in (curses.KEY_LEFT, curses.KEY_BACKSPACE, 127, 8):
             if self.level == "nodes":
                 self.level = "groups"
@@ -450,11 +530,11 @@ def init_colors():
     curses.init_pair(COLORS["dim"], curses.COLOR_CYAN, -1)
 
 
-def run(nodes, host, reload_nodes=None):
+def run(nodes, host, reload_nodes=None, load_jobs=None):
     locale.setlocale(locale.LC_ALL, "")
 
     def start(screen):
         init_colors()
-        Browser(screen, nodes, host, reload_nodes).run()
+        Browser(screen, nodes, host, reload_nodes, load_jobs).run()
 
     curses.wrapper(start)

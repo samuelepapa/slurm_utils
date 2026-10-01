@@ -168,16 +168,17 @@ slurm-resources [--host LOGIN_HOST] [--partition PARTITION] [--plain]
 
 You start on the overview, one row per partition, and drill into a group to see its nodes. On large
 clusters the node list is sorted with the emptiest nodes first, so the capacity you can actually use is
-always at the top.
+always at the top. Opening a node lists the jobs running on it (read with `squeue --nodelist`), with
+their user, state, elapsed time, time limit, CPUs, memory, and GRES; use `↑` `↓` to scroll long job lists.
 
 | Key | Action |
 | --- | --- |
 | `↑` `↓` `PgUp` `PgDn` `Home` `End` | Move |
-| `→` or `Enter` | Open the selected group, or show node details |
+| `→` or `Enter` | Open the selected group, or show node details and the jobs running on it |
 | `←` or `Backspace` | Go back |
 | `a` `f` `p` `u` `d` | Show all / free / partial / fully used / down nodes |
 | `/` | Search by node name |
-| `r` | Re-read the cluster |
+| `r` | Re-read the cluster, or reload the jobs in the node details |
 | `q` | Quit |
 
 #### Options

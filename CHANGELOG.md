@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- The `slurm-resources` node detail view now lists the jobs running on the node (job ID, user, state, elapsed time, time limit, CPUs, memory, GRES, and name), read with `squeue` when the node is opened. Scroll with `↑`/`↓` and reload the jobs with `r`.
+
 ## [0.4.0] - 2026-10-01
 
 ### Changed

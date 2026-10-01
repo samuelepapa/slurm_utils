@@ -51,6 +51,17 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(resources.parse_gres("gpu:2"), (None, 2))
         self.assertEqual(resources.parse_gres("(null)"), (None, 0))
 
+    def test_parse_jobs_keeps_separators_in_the_job_name(self):
+        jobs = resources.parse_jobs(
+            "4242|alice|RUNNING|1:02:03|2-00:00:00|16|120G|gres/gpu:2|a|b\n"
+            "4243|bob|COMPLETING|0:05|1:00:00|8|32G|N/A|eval\n\n"
+        )
+
+        self.assertEqual([job["id"] for job in jobs], ["4242", "4243"])
+        self.assertEqual(jobs[0]["name"], "a|b")
+        self.assertEqual(jobs[0]["gres"], "gpu:2")
+        self.assertEqual(jobs[1]["gres"], "")
+
     def test_build_node_reads_allocation(self):
         node = resources.parse_nodes(GPU_NODE)[0]
 
